@@ -24,21 +24,16 @@ Hooks.once("init", () => {
     requiresReload: false,
   });
 
-  game.settings.register(MODULE_ID, "keybindModifiers", {
-    name: "REGIONVIS.KeybindModifiers",
-    hint: "REGIONVIS.KeybindModifiersHint",
-    scope: "client",
-    config: true,
-    type: String,
-    default: "Control+Shift",
-    choices: {
-      "Control+Shift": "Control+Shift",
-      "Alt+Shift": "Alt+Shift",
-      "Control+Alt": "Control+Alt",
-      "": "REGIONVIS.NoModifiers",
-    },
-    requiresReload: false,
+  game.keybindings.register(MODULE_ID, "toggleRange", {
+    name: "REGIONVIS.KeybindName",
+    hint: "REGIONVIS.KeybindHint",
+    editable: [
+      { key: "KeyV", modifiers: ["Control", "Shift"] },
+    ],
+    onDown: toggleRangeRegion,
+    precedence: CONST.KEYBIND_PRECEDENCE.NORMAL,
   });
+
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -149,8 +144,10 @@ Hooks.on("renderTokenConfig", (app, html, _data) => {
     style.textContent = `
       .vr-grid-table { border-collapse: collapse; margin: 0.5em 0; }
       .vr-grid-table td {
-        width: 22px; height: 22px; border: 1px solid #666;
-        background: #222; cursor: pointer; transition: background 0.1s;
+        width: 22px; height: 22px; padding: 0;
+        border: 1px solid #666; background: #222;
+        cursor: pointer; box-sizing: border-box;
+        line-height: 0; font-size: 0;
       }
       .vr-grid-table td:hover { border-color: #ff6400; }
       .vr-grid-table td.active { background: #ff6400; border-color: #ff8533; }
@@ -379,21 +376,6 @@ async function toggleRangeRegion() {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Keybind
-// ═══════════════════════════════════════════════════════════════════════════════
-
-Hooks.once("ready", () => {
-  game.keybindings.register(MODULE_ID, "toggleRange", {
-    name: "REGIONVIS.KeybindName",
-    hint: "REGIONVIS.KeybindHint",
-    editable: [
-      { key: "KeyV", modifiers: ["Control", "Shift"] },
-    ],
-    onDown: toggleRangeRegion,
-    precedence: CONST.KEYBIND_PRECEDENCE.NORMAL,
-  });
-});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Region Lifecycle — clean up token flags when a tracked region is deleted
