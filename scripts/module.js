@@ -53,8 +53,7 @@ function refreshAllRegions() {
  * Attached via the renderRegionConfig hook.
  */
 function injectVisibilitySection(app, html, _data) {
-  const root = html[0] ?? html;
-  const form = root.querySelector?.("form") ?? root;
+  const form = app.element;
   if (!form || form.querySelector(".region-visibility-config")) return;
 
   const doc = app.document;
@@ -83,12 +82,10 @@ function injectVisibilitySection(app, html, _data) {
     </div>
   `;
 
-  // Insert before the form footer; fallback to appending at the end
-  const footer = form.querySelector("footer");
-  if (footer) {
-    form.insertBefore(section, footer);
-  } else {
-    form.appendChild(section);
+  // Inject into the Appearance tab so it renders with the rest of the form
+  const appearanceTab = form.querySelector('.tab[data-tab="appearance"]');
+  if (appearanceTab) {
+    appearanceTab.appendChild(section);
   }
 
   // Auto-save visibility settings to document flags on field change
