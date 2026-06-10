@@ -1,3 +1,7 @@
 {
-    "MODULE.hello": "hello"
+  "REGIONVIS.BehaviorLabel": "Token Visibility",
+  "REGIONVIS.LinkedTokenUuid": "Linked Token UUID",
+  "REGIONVIS.LinkedTokenUuidHint": "UUID of the token that controls this region's visibility. Only players who select this token will see the region.",
+  "REGIONVIS.HideFromGM": "Hide from GM",
+  "REGIONVIS.HideFromGMHint": "If enabled, the region is also hidden from the GM when the linked token is not selected. By default the GM always sees all regions."
 }
