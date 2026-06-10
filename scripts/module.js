@@ -31,7 +31,7 @@ Hooks.once("init", () => {
       { key: "KeyV", modifiers: ["Control", "Shift"] },
     ],
     onDown: toggleRangeRegion,
-    precedence: CONST.KEYBIND_PRECEDENCE.NORMAL,
+    precedence: 1, // NORMAL (CONST.KEYBIND_PRECEDENCE removed in V14)
   });
 
 });
@@ -118,6 +118,53 @@ function gridToShapes(grid, cellSize, offsetX, offsetY) {
   return { points: allPoints, shapes };
 }
 
+/**
+ * Build polygon shapes for a token from its stored range grid.
+ * Always includes the token's own footprint.
+ * Points are in token-relative coordinates (token top-left = origin).
+ * Rotation is NOT pre-applied — the attachment system handles it.
+ * @param {TokenDocument} tokenDoc
+ * @param {boolean[][]}   grid
+ * @returns {{ shapes: Array<{type:"polygon",points:number[]}> }}
+ */
+function buildShapesForToken(tokenDoc, grid) {
+  const gridSize = grid.length;
+  const cellSize = canvas.grid.size;
+  const tokenW = tokenDoc.width ?? 1;
+  const tokenH = tokenDoc.height ?? 1;
+
+  // Absolute canvas coordinates centred on token centre.
+  // Attachment handles position delta tracking, but initial placement
+  // must be at the token's actual canvas location.
+  const halfGridCells = gridSize / 2;
+  const tokenCenterX = tokenDoc.x + (tokenW * cellSize) / 2;
+  const tokenCenterY = tokenDoc.y + (tokenH * cellSize) / 2;
+  const offsetX = tokenCenterX - halfGridCells * cellSize;
+  const offsetY = tokenCenterY - halfGridCells * cellSize;
+
+  const { shapes } = gridToShapes(grid, cellSize, offsetX, offsetY);
+
+  // Pre-rotate points to match token's current orientation.
+  // Attachment handles animation deltas but initial rotation must be baked in.
+  const rotation = ((tokenDoc.rotation ?? 0) + 90) % 360;
+  if (rotation) {
+    const rad = (rotation * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    for (const sh of shapes) {
+      const pts = sh.points;
+      for (let i = 0; i < pts.length; i += 2) {
+        const dx = pts[i] - tokenCenterX;
+        const dy = pts[i + 1] - tokenCenterY;
+        pts[i] = tokenCenterX + dx * cos - dy * sin;
+        pts[i + 1] = tokenCenterY + dx * sin + dy * cos;
+      }
+    }
+  }
+
+  return { shapes };
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Token Config — Grid Injection
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -142,16 +189,19 @@ Hooks.on("renderTokenConfig", (app, html, _data) => {
     const style = document.createElement("style");
     style.id = "vr-grid-styles";
     style.textContent = `
-      .vr-grid-table { border-collapse: collapse; margin: 0.5em 0; }
-      .vr-grid-table td {
-        width: 22px; height: 22px; padding: 0;
+      .vr-grid { display: grid; gap: 0; margin: 0.5em 0; width: fit-content; }
+      .vr-cell {
+        width: 22px !important; height: 22px !important;
+        min-width: 22px !important; min-height: 22px !important;
+        max-width: 22px !important; max-height: 22px !important;
+        padding: 0 !important; margin: 0 !important;
         border: 1px solid #666; background: #222;
         cursor: pointer; box-sizing: border-box;
-        line-height: 0; font-size: 0;
+        display: block !important;
       }
-      .vr-grid-table td:hover { border-color: #ff6400; }
-      .vr-grid-table td.active { background: #ff6400; border-color: #ff8533; }
-      .vr-grid-table td.token-center { background: #444; border-color: #888; }
+      .vr-cell:hover { border-color: #ff6400; }
+      .vr-cell.active { background: #ff6400; border-color: #ff8533; }
+      .vr-cell.token-center { background: #444; border-color: #888; }
       .vr-legend { display: flex; gap: 1em; align-items: center; margin: 0.5em 0; font-size: 0.9em; }
       .vr-legend span { display: inline-block; width: 16px; height: 16px; border: 1px solid #666; }
       .vr-legend .vr-legend-center { background: #444; }
@@ -161,22 +211,25 @@ Hooks.on("renderTokenConfig", (app, html, _data) => {
     document.head.appendChild(style);
   }
 
-  // ── compute token centre position in grid ────────────────────────────────
-  const cx = Math.floor(gridSize / 2);
-  const cy = Math.floor(gridSize / 2);
+  // ── compute token footprint in grid ──────────────────────────────────────
+  const tokenW = token.width ?? 1;
+  const tokenH = token.height ?? 1;
+  const halfGrid = Math.floor(gridSize / 2);
+  const footStartX = halfGrid - Math.floor(tokenW / 2);
+  const footStartY = halfGrid - Math.floor(tokenH / 2);
 
-  // ── build grid table ────────────────────────────────────────────────────
-  let gridHtml = '<table class="vr-grid-table"><tbody>';
+  // ── build grid (CSS grid, avoids Foundry table style conflicts) ──────────
+  let gridHtml = `<div class="vr-grid" style="grid-template-columns: repeat(${gridSize}, 22px);">`;
   for (let y = 0; y < gridSize; y++) {
-    gridHtml += "<tr>";
     for (let x = 0; x < gridSize; x++) {
+      const onFootprint = x >= footStartX && x < footStartX + tokenW &&
+                          y >= footStartY && y < footStartY + tokenH;
       const active = rangeGrid[y]?.[x] ? " active" : "";
-      const center = x === cx && y === cy ? " token-center" : "";
-      gridHtml += `<td class="vr-cell${active}${center}" data-x="${x}" data-y="${y}"></td>`;
+      const center = onFootprint ? " token-center" : "";
+      gridHtml += `<div class="vr-cell${active}${center}" data-x="${x}" data-y="${y}"></div>`;
     }
-    gridHtml += "</tr>";
   }
-  gridHtml += "</tbody></table>";
+  gridHtml += "</div>";
 
   // ── assemble section HTML ────────────────────────────────────────────────
   const sectionHtml = `
@@ -309,7 +362,7 @@ async function toggleRangeRegion() {
         game.i18n.format("REGIONVIS.RegionRemoved", { name })
       );
     } else {
-      // Region was deleted externally — just clean up the flag
+      // Region was deleted externally — just clean up the flags
       await tokenDoc.unsetFlag(MODULE_ID, "activeRegionId");
       ui.notifications.warn(game.i18n.localize("REGIONVIS.RegionNotFound"));
     }
@@ -318,56 +371,66 @@ async function toggleRangeRegion() {
 
   // ── Build polygon from stored grid ───────────────────────────────────────
   const rangeGrid = tokenDoc.getFlag(MODULE_ID, "rangeGrid");
-  if (
-    !Array.isArray(rangeGrid) ||
-    rangeGrid.length === 0 ||
-    !rangeGrid.some(row => row.some(Boolean))
-  ) {
+  const gridSize = tokenDoc.getFlag(MODULE_ID, "rangeGrid")?.length
+    ?? game.settings.get(MODULE_ID, "gridSize");
+
+  // Normalise and inject token footprint
+  let grid = Array.isArray(rangeGrid) && rangeGrid.length === gridSize
+    ? rangeGrid.map(row => [...row])
+    : Array.from({ length: gridSize }, () => Array(gridSize).fill(false));
+
+  if (grid.length === 0) {
     ui.notifications.warn(game.i18n.localize("REGIONVIS.NoPattern"));
     return;
   }
 
-  const gridSize = rangeGrid.length;
-  const cellSize = canvas.grid.size;
-  const tokenW = tokenDoc.width;
-  const tokenH = tokenDoc.height;
-
-  // The grid is centred on the token's centre.
-  // Compute the top-left of the grid, relative to the token's top-left,
-  // so that the token centre cell aligns with the token's visual centre.
+  const tokenW = tokenDoc.width ?? 1;
+  const tokenH = tokenDoc.height ?? 1;
   const halfGridCells = gridSize / 2;
-  const tokenCenterX = tokenDoc.x + (tokenW * cellSize) / 2;
-  const tokenCenterY = tokenDoc.y + (tokenH * cellSize) / 2;
-  const offsetX = tokenCenterX - halfGridCells * cellSize;
-  const offsetY = tokenCenterY - halfGridCells * cellSize;
+  const footStartX = Math.floor(halfGridCells) - Math.floor(tokenW / 2);
+  const footStartY = Math.floor(halfGridCells) - Math.floor(tokenH / 2);
+  for (let ty = 0; ty < tokenH; ty++) {
+    for (let tx = 0; tx < tokenW; tx++) {
+      const gx = footStartX + tx;
+      const gy = footStartY + ty;
+      if (gy >= 0 && gy < gridSize && gx >= 0 && gx < gridSize) {
+        grid[gy][gx] = true;
+      }
+    }
+  }
 
-  const { shapes } = gridToShapes(rangeGrid, cellSize, offsetX, offsetY);
+  const { shapes } = buildShapesForToken(tokenDoc, grid);
 
   if (shapes.length === 0) {
     ui.notifications.warn(game.i18n.localize("REGIONVIS.NoVertices"));
     return;
   }
 
-  // ── Place the region ─────────────────────────────────────────────────────
+  // ── Create region directly (non-interactive) ──────────────────────────────
+  const RegionDocument = CONFIG.Region.documentClass;
   const regionData = {
     name: `${token.name} — ${game.i18n.localize("REGIONVIS.RangeRegionSuffix")}`,
     shapes,
     visibility: CONST.REGION_VISIBILITY?.ALWAYS ?? 2,
-    levels: [canvas.scene?.levels?.[0]?.id ?? null].filter(Boolean),
+    attachment: { token: tokenDoc.id },
     ownership: {
       [game.user.id]: CONST.DOCUMENT_OWNERSHIP_LEVELS.OWNER,
     },
     displayMeasurements: false,
-    highlightMode: "none",
     color: game.user.color,
   };
 
-  const created = await canvas.regions.placeRegions([regionData], {
-    attachToToken: true,
-  });
+  let regionDoc;
+  try {
+    regionDoc = await RegionDocument.create(regionData, { parent: canvas.scene });
+  } catch (err) {
+    ui.notifications.error(game.i18n.localize("REGIONVIS.RegionFailed"));
+    console.error("Region Visibility | create failed:", err);
+    return;
+  }
 
-  if (created && created.length > 0 && created[0]) {
-    await tokenDoc.setFlag(MODULE_ID, "activeRegionId", created[0].id);
+  if (regionDoc) {
+    await tokenDoc.setFlag(MODULE_ID, "activeRegionId", regionDoc.id);
     ui.notifications.info(
       game.i18n.format("REGIONVIS.RegionCreated", { name: token.name })
     );
@@ -382,7 +445,6 @@ async function toggleRangeRegion() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 Hooks.on("deleteRegion", (region, _options, _userId) => {
-  // If a tracked region is deleted (by anyone), clear the flag from its token
   if (!canvas.scene) return;
   for (const token of canvas.scene.tokens) {
     const trackedId = token.getFlag(MODULE_ID, "activeRegionId");
@@ -399,6 +461,6 @@ Hooks.on("preDeleteToken", (tokenDoc, _options, _userId) => {
   if (!regionId) return;
   const region = tokenDoc.parent?.regions?.get(regionId);
   if (region) {
-    region.delete().catch(() => {}); // Fire-and-forget; region may already be gone
+    region.delete().catch(() => {});
   }
 });
