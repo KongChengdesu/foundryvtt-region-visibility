@@ -1,7 +1,7 @@
 {
-"id": "region-visibility",
+  "id": "region-visibility",
   "title": "Region Visibility",
-  "description": "Adds token-linked visibility to Regions. Regions only display on the canvas when a player selects their linked token. GM always sees all regions by default.",
+  "description": "Adds token-linked visibility to Regions, plus a configurable 2D visibility-range grid that creates polygon regions around tokens via keybind.",
   "version": "#{VERSION}#",
   "library": "false",
   "manifestPlusVersion": "1.2.0",

@@ -3,5 +3,33 @@
   "REGIONVIS.LinkedTokenUuid": "Linked Token UUID",
   "REGIONVIS.LinkedTokenUuidHint": "UUID of the token that controls this region's visibility. Only players who select this token will see the region.",
   "REGIONVIS.HideFromGM": "Hide from GM",
-  "REGIONVIS.HideFromGMHint": "If enabled, the region is also hidden from the GM when the linked token is not selected. By default the GM always sees all regions."
+  "REGIONVIS.HideFromGMHint": "If enabled, the region is also hidden from the GM when the linked token is not selected. By default the GM always sees all regions.",
+
+  "REGIONVIS.GridSize": "Grid Size",
+  "REGIONVIS.GridSizeHint": "Number of cells per side of the visibility range grid. Default is 10 (a 10×10 grid). Changing this resets stored patterns — existing tokens keep their saved grid data until reconfigured.",
+  "REGIONVIS.KeybindModifiers": "Keybind Modifiers",
+  "REGIONVIS.KeybindModifiersHint": "Modifier keys combined with V to toggle the visibility range region. Change here if the default conflicts with other modules.",
+  "REGIONVIS.NoModifiers": "None (V only)",
+
+  "REGIONVIS.RangeSectionLabel": "Visibility Range",
+  "REGIONVIS.RangeHint": "Click cells to define the visibility range shape. Active cells (orange) will form a polygon region around the token when toggled via keybind. The darker centre cell marks the token's position.",
+  "REGIONVIS.TokenCenter": "Token centre",
+  "REGIONVIS.VisibleCell": "Visible cell",
+  "REGIONVIS.ClearAll": "Clear All",
+  "REGIONVIS.FillAll": "Fill All",
+  "REGIONVIS.Invert": "Invert",
+
+  "REGIONVIS.KeybindName": "Toggle Visibility Range",
+  "REGIONVIS.KeybindHint": "Create or remove the visibility-range polygon region for the currently selected token.",
+
+  "REGIONVIS.NoCanvas": "No active canvas scene.",
+  "REGIONVIS.GMOnly": "Only the GM can create or remove visibility range regions.",
+  "REGIONVIS.SelectToken": "Select a token first before toggling the visibility range.",
+  "REGIONVIS.NoPattern": "No visibility range pattern set for this token. Open token configuration and define a pattern on the Visibility Range grid.",
+  "REGIONVIS.NoVertices": "The selected cells do not form a valid polygon (need at least 3 boundary vertices). Select more cells.",
+  "REGIONVIS.RegionCreated": "Visibility range region created for {name}.",
+  "REGIONVIS.RegionRemoved": "Visibility range region \"{name}\" removed.",
+  "REGIONVIS.RegionFailed": "Failed to create region. The operation may have been cancelled or the scene is not editable.",
+  "REGIONVIS.RegionNotFound": "Tracked region no longer exists. Flag cleaned up. Press keybind again to create a new one.",
+  "REGIONVIS.RangeRegionSuffix": "Visibility Range"
 }
