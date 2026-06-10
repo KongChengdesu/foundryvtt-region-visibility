@@ -1,7 +1,10 @@
-{  "id": "region-visibility",
+{
+"id": "region-visibility",
   "title": "Region Visibility",
   "description": "Adds token-linked visibility to Regions. Regions only display on the canvas when a player selects their linked token. GM always sees all regions by default.",
-  "version": "1.0.0",
+  "version": "#{VERSION}#",
+  "library": "false",
+  "manifestPlusVersion": "1.2.0",
   "compatibility": {
     "minimum": 14,
     "verified": 14,
@@ -20,6 +23,12 @@
   "esmodules": [
     "scripts/module.js"
   ],
+  "scripts": [
+    "scripts/lib/lib.js"
+  ],
+  "styles": [
+    "styles/module.css"
+  ],
   "languages": [
     {
       "lang": "en",
@@ -27,6 +36,15 @@
       "path": "languages/en.json"
     }
   ],
+  "url": "#{URL}#",
+  "manifest": "#{MANIFEST}#",
+  "download": "#{DOWNLOAD}#",
   "license": "LICENSE",
-  "readme": "README.md"
+  "readme": "README.md",
+  "media": [
+    {
+      "type": "icon",
+      "url": "https://avatars2.githubusercontent.com/u/71292812?s=400&u=ccdb4eeb7abf551ca8f314e5a9bfd0479a4d3d41&v=4"
+    }
+  ]
 }
