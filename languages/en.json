@@ -1,5 +1,5 @@
 {
-  "REGIONVIS.BehaviorLabel": "Token Visibility",
+  "REGIONVIS.SectionLabel": "Token Visibility",
   "REGIONVIS.LinkedTokenUuid": "Linked Token UUID",
   "REGIONVIS.LinkedTokenUuidHint": "UUID of the token that controls this region's visibility. Only players who select this token will see the region.",
   "REGIONVIS.HideFromGM": "Hide from GM",
