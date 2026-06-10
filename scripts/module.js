@@ -128,6 +128,7 @@ function gridToShapes(grid, cellSize, offsetX, offsetY) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 Hooks.on("renderTokenConfig", (app, html, _data) => {
+  html = $(html); // V14 may pass raw element
   const token = app.document;
   if (!token) return;
 
