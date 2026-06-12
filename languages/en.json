@@ -7,6 +7,10 @@
 
   "REGIONVIS.GridSize": "Grid Size",
   "REGIONVIS.GridSizeHint": "Number of cells per side of the visibility range grid. Default is 10 (a 10×10 grid). Changing this resets stored patterns — existing tokens keep their saved grid data until reconfigured.",
+  "REGIONVIS.GridAlignment": "Grid Alignment",
+  "REGIONVIS.GridAlignmentHint": "Toggles between two offset formulas for placing the region grid. If the region appears shifted ~0.5 cell right/down, try switching to Corner mode.",
+  "REGIONVIS.GridAlignmentCenter": "Center (default)",
+  "REGIONVIS.GridAlignmentCorner": "Corner",
   "REGIONVIS.KeybindModifiers": "Keybind Modifiers",
   "REGIONVIS.KeybindModifiersHint": "Modifier keys combined with V to toggle the visibility range region. Change here if the default conflicts with other modules.",
   "REGIONVIS.NoModifiers": "None (V only)",

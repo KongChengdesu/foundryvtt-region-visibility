@@ -33,6 +33,20 @@ Hooks.once("init", () => {
     requiresReload: false,
   });
 
+  game.settings.register(MODULE_ID, "gridAlignment", {
+    name: "REGIONVIS.GridAlignment",
+    hint: "REGIONVIS.GridAlignmentHint",
+    scope: "world",
+    config: true,
+    type: String,
+    choices: {
+      center: "REGIONVIS.GridAlignmentCenter",
+      corner: "REGIONVIS.GridAlignmentCorner",
+    },
+    default: "center",
+    requiresReload: false,
+  });
+
   game.keybindings.register(MODULE_ID, "toggleRange", {
     name: "REGIONVIS.KeybindName",
     hint: "REGIONVIS.KeybindHint",
@@ -190,11 +204,14 @@ function buildShapesForToken(tokenDoc, grid) {
   // Absolute canvas coordinates centred on token centre.
   // Attachment handles position delta tracking, but initial placement
   // must be at the token's actual canvas location.
+  // Some scenes need the grid aligned to cell centres (gridSize/2),
+  // others to cell corners (floor(gridSize/2)) — user picks in settings.
+  const alignment = game.settings.get(MODULE_ID, "gridAlignment");
   const halfGridCells = gridSize / 2;
   const tokenCenterX = tokenDoc.x + (tokenW * cellSize) / 2;
   const tokenCenterY = tokenDoc.y + (tokenH * cellSize) / 2;
-  const offsetX = tokenCenterX - halfGridCells * cellSize;
-  const offsetY = tokenCenterY - halfGridCells * cellSize;
+  const offsetX = (alignment === "corner" ? tokenDoc.x : tokenCenterX) - halfGridCells * cellSize;
+  const offsetY = (alignment === "corner" ? tokenDoc.y : tokenCenterY) - halfGridCells * cellSize;
 
   const { shapes } = gridToShapes(grid, cellSize, offsetX, offsetY);
 
