@@ -8,6 +8,15 @@
 
 const MODULE_ID = "region-visibility";
 
+import {
+  initPresetSystem,
+  openRangeDesigner,
+  RangePresetList,
+  onPreDeleteToken,
+  onDeleteRegion,
+  getApi,
+} from "./range-presets.js";
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Settings
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -19,7 +28,7 @@ Hooks.once("init", () => {
     scope: "world",
     config: true,
     type: Number,
-    default: 10,
+    default: 9,
     range: { min: 3, max: 30, step: 1 },
     requiresReload: false,
   });
@@ -32,6 +41,36 @@ Hooks.once("init", () => {
     ],
     onDown: toggleRangeRegion,
     precedence: 1, // NORMAL (CONST.KEYBIND_PRECEDENCE removed in V14)
+  });
+
+  // ── Range Preset System ──
+  game.settings.register(MODULE_ID, "rangePresets", {
+    scope: "world",
+    config: false,
+    type: Array,
+    default: [],
+  });
+
+  initPresetSystem(MODULE_ID, buildShapesForToken);
+
+  game.keybindings.register(MODULE_ID, "openPresetList", {
+    name: "REGIONVIS.OpenPresetListKeybindName",
+    hint: "REGIONVIS.OpenPresetListKeybindHint",
+    editable: [
+      { key: "KeyP", modifiers: ["Control", "Shift"] },
+    ],
+    onDown: () => new RangePresetList().render(true),
+    precedence: 1,
+  });
+
+  game.keybindings.register(MODULE_ID, "clearAllRegions", {
+    name: "REGIONVIS.ClearAllRegionsKeybindName",
+    hint: "REGIONVIS.ClearAllRegionsKeybindHint",
+    editable: [
+      { key: "KeyC", modifiers: ["Control", "Shift"] },
+    ],
+    onDown: clearAllRegions,
+    precedence: 1,
   });
 
 });
@@ -133,6 +172,21 @@ function buildShapesForToken(tokenDoc, grid) {
   const tokenW = tokenDoc.width ?? 1;
   const tokenH = tokenDoc.height ?? 1;
 
+  // Force-include token's own footprint cells so region shape always
+  // covers the square the token occupies.
+  const halfGrid = Math.floor(gridSize / 2);
+  const footStartX = halfGrid - Math.floor(tokenW / 2);
+  const footStartY = halfGrid - Math.floor(tokenH / 2);
+  for (let ty = 0; ty < tokenH; ty++) {
+    for (let tx = 0; tx < tokenW; tx++) {
+      const gx = footStartX + tx;
+      const gy = footStartY + ty;
+      if (gy >= 0 && gy < gridSize && gx >= 0 && gx < gridSize) {
+        grid[gy][gx] = true;
+      }
+    }
+  }
+
   // Absolute canvas coordinates centred on token centre.
   // Attachment handles position delta tracking, but initial placement
   // must be at the token's actual canvas location.
@@ -166,72 +220,84 @@ function buildShapesForToken(tokenDoc, grid) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Token Config — Grid Injection
+// Range Grid UI — shared between TokenConfig and PrototypeTokenConfig
 // ═══════════════════════════════════════════════════════════════════════════════
 
-Hooks.on("renderTokenConfig", (app, html, _data) => {
-  html = $(html); // V14 may pass raw element
-  const token = app.document;
-  if (!token) return;
+/**
+ * Ensure grid CSS is injected into the document once.
+ */
+function _injectRangeGridStyles() {
+  if (document.getElementById("vr-grid-styles")) return;
+  const style = document.createElement("style");
+  style.id = "vr-grid-styles";
+  style.textContent = `
+    .vr-grid { display: grid; gap: 0; margin: 0.5em 0; width: fit-content; }
+    .vr-cell {
+      width: 22px !important; height: 22px !important;
+      min-width: 22px !important; min-height: 22px !important;
+      max-width: 22px !important; max-height: 22px !important;
+      padding: 0 !important; margin: 0 !important;
+      border: 1px solid #666; background: #222;
+      cursor: pointer; box-sizing: border-box;
+      display: block !important;
+    }
+    .vr-cell:hover { border-color: #ff6400; }
+    .vr-cell.active { background: #ff6400; border-color: #ff8533; }
+    .vr-cell.token-center { background: #444; border-color: #888; }
+    .vr-legend { display: flex; gap: 1em; align-items: center; margin: 0.5em 0; font-size: 0.9em; }
+    .vr-legend span { display: inline-block; width: 16px; height: 16px; border: 1px solid #666; }
+    .vr-legend .vr-legend-center { background: #444; }
+    .vr-legend .vr-legend-active { background: #ff6400; }
+    .vr-legend .vr-legend-dir { border: none; color: #ff6400; font-weight: bold; font-size: 1.2em; text-align: center; line-height: 16px; }
+    .vr-config-section .form-group { margin: 0.5em 0; }
+    .vr-cell.center-arrow { display: flex !important; align-items: center; justify-content: center; color: #ff6400; font-size: 12px; }
+  `;
+  document.head.appendChild(style);
+}
 
-  const gridSize = game.settings.get(MODULE_ID, "gridSize");
-  let rangeGrid = token.getFlag(MODULE_ID, "rangeGrid");
+/**
+ * Render the range-grid UI into a token-config or prototype-token-config form.
+ *
+ * @param {JQuery}   html       - The form HTML to inject into
+ * @param {object}   ctx
+ * @param {number}   ctx.width   - Token width in grid cells
+ * @param {number}   ctx.height  - Token height in grid cells
+ * @param {boolean[][]} ctx.rangeGrid - Current grid state
+ * @param {number}   ctx.gridSize - Grid dimension (N×N)
+ * @param {string}   ctx.color   - Hex colour for the region
+ * @param {(grid: boolean[][]) => Promise<void>} onSaveGrid
+ * @param {(color: string) => Promise<void>} [onSaveColor]
+ */
+function _renderRangeGridUI(html, { width, height, rangeGrid, gridSize, color }, onSaveGrid, onSaveColor) {
+  _injectRangeGridStyles();
 
-  // Normalise stored grid to current gridSize
-  if (!Array.isArray(rangeGrid) || rangeGrid.length !== gridSize) {
-    rangeGrid = Array.from({ length: gridSize }, () =>
-      new Array(gridSize).fill(false)
-    );
-  }
+  let currentGrid = rangeGrid.map(row => [...row]);
 
-  // ── inject CSS once ──────────────────────────────────────────────────────
-  if (!document.getElementById("vr-grid-styles")) {
-    const style = document.createElement("style");
-    style.id = "vr-grid-styles";
-    style.textContent = `
-      .vr-grid { display: grid; gap: 0; margin: 0.5em 0; width: fit-content; }
-      .vr-cell {
-        width: 22px !important; height: 22px !important;
-        min-width: 22px !important; min-height: 22px !important;
-        max-width: 22px !important; max-height: 22px !important;
-        padding: 0 !important; margin: 0 !important;
-        border: 1px solid #666; background: #222;
-        cursor: pointer; box-sizing: border-box;
-        display: block !important;
-      }
-      .vr-cell:hover { border-color: #ff6400; }
-      .vr-cell.active { background: #ff6400; border-color: #ff8533; }
-      .vr-cell.token-center { background: #444; border-color: #888; }
-      .vr-legend { display: flex; gap: 1em; align-items: center; margin: 0.5em 0; font-size: 0.9em; }
-      .vr-legend span { display: inline-block; width: 16px; height: 16px; border: 1px solid #666; }
-      .vr-legend .vr-legend-center { background: #444; }
-      .vr-legend .vr-legend-active { background: #ff6400; }
-      .vr-config-section .form-group { margin: 0.5em 0; }
-    `;
-    document.head.appendChild(style);
-  }
-
-  // ── compute token footprint in grid ──────────────────────────────────────
-  const tokenW = token.width ?? 1;
-  const tokenH = token.height ?? 1;
+  const tokenW = width ?? 1;
+  const tokenH = height ?? 1;
   const halfGrid = Math.floor(gridSize / 2);
   const footStartX = halfGrid - Math.floor(tokenW / 2);
   const footStartY = halfGrid - Math.floor(tokenH / 2);
 
-  // ── build grid (CSS grid, avoids Foundry table style conflicts) ──────────
+  // ── build grid ──────────────────────────────────────────────────────────────
+  const gridCenterX = Math.floor(gridSize / 2);
+  const gridCenterY = Math.floor(gridSize / 2);
   let gridHtml = `<div class="vr-grid" style="grid-template-columns: repeat(${gridSize}, 22px);">`;
   for (let y = 0; y < gridSize; y++) {
     for (let x = 0; x < gridSize; x++) {
       const onFootprint = x >= footStartX && x < footStartX + tokenW &&
                           y >= footStartY && y < footStartY + tokenH;
-      const active = rangeGrid[y]?.[x] ? " active" : "";
+      const active = currentGrid[y]?.[x] ? " active" : "";
       const center = onFootprint ? " token-center" : "";
-      gridHtml += `<div class="vr-cell${active}${center}" data-x="${x}" data-y="${y}"></div>`;
+      const isCenter = x === gridCenterX && y === gridCenterY;
+      const arrow = isCenter ? " center-arrow" : "";
+      const content = isCenter ? '<i class="fas fa-arrow-right"></i>' : "";
+      gridHtml += `<div class="vr-cell${active}${center}${arrow}" data-x="${x}" data-y="${y}">${content}</div>`;
     }
   }
   gridHtml += "</div>";
 
-  // ── assemble section HTML ────────────────────────────────────────────────
+  // ── section HTML ────────────────────────────────────────────────────────────
   const sectionHtml = `
     <fieldset class="vr-config-section">
       <legend>${game.i18n.localize("REGIONVIS.RangeSectionLabel")}</legend>
@@ -241,6 +307,7 @@ Hooks.on("renderTokenConfig", (app, html, _data) => {
       <div class="vr-legend">
         <span class="vr-legend-center"></span> ${game.i18n.localize("REGIONVIS.TokenCenter")}
         <span class="vr-legend-active"></span> ${game.i18n.localize("REGIONVIS.VisibleCell")}
+        <span class="vr-legend-dir"><i class="fas fa-arrow-right"></i></span> ${game.i18n.localize("REGIONVIS.TokenOrientation")}
       </div>
       ${gridHtml}
       <div class="form-group" style="margin-top:0.5em;">
@@ -254,68 +321,142 @@ Hooks.on("renderTokenConfig", (app, html, _data) => {
           <i class="fas fa-exchange-alt"></i> ${game.i18n.localize("REGIONVIS.Invert")}
         </button>
       </div>
+      <div class="form-group">
+        <label>${game.i18n.localize("REGIONVIS.RegionColor")}</label>
+        <div class="form-fields">
+          <input type="color" class="vr-region-color" value="${color}" data-edit="regionColor">
+        </div>
+      </div>
+      <div class="form-group" style="margin-top:0.5em;">
+        <button type="button" class="vr-save-preset-btn">
+          <i class="fas fa-save"></i> ${game.i18n.localize("REGIONVIS.SaveAsPreset")}
+        </button>
+      </div>
     </fieldset>
   `;
 
-  // ── inject into the Appearance tab, fall back to bottom of form ──────────
+  // ── inject into Appearance tab, fall back to bottom of form ────────────────
   const appearanceTab = html.find('.tab[data-tab="appearance"]');
   const target = appearanceTab.length ? appearanceTab : html.find("form");
   target.append(sectionHtml);
 
-  // ── cell click handler ───────────────────────────────────────────────────
-  html.find(".vr-cell").on("click", function () {
+  // ── helpers ─────────────────────────────────────────────────────────────────
+  function _cellGrid() {
+    return currentGrid.map(row => [...row]);
+  }
+
+  async function _save() {
+    await onSaveGrid(_cellGrid());
+  }
+
+  // ── cell click handler ──────────────────────────────────────────────────────
+  html.find(".vr-cell").on("click", async function () {
     const cell = $(this);
     const x = parseInt(cell.data("x"));
     const y = parseInt(cell.data("y"));
-
     cell.toggleClass("active");
-    const isActive = cell.hasClass("active");
-
-    let grid = token.getFlag(MODULE_ID, "rangeGrid");
-    if (!Array.isArray(grid) || grid.length !== gridSize) {
-      grid = Array.from({ length: gridSize }, () =>
-        new Array(gridSize).fill(false)
-      );
-    } else {
-      // Deep-clone to avoid mutating the cached flag object
-      grid = grid.map(row => [...row]);
-    }
-    grid[y][x] = isActive;
-    token.setFlag(MODULE_ID, "rangeGrid", grid);
+    currentGrid[y][x] = cell.hasClass("active");
+    await _save();
   });
 
-  // ── button handlers ──────────────────────────────────────────────────────
-  html.find(".vr-clear-btn").on("click", () => {
-    const grid = Array.from({ length: gridSize }, () =>
-      new Array(gridSize).fill(false)
-    );
-    token.setFlag(MODULE_ID, "rangeGrid", grid);
+  // ── button handlers ─────────────────────────────────────────────────────────
+  html.find(".vr-clear-btn").on("click", async () => {
+    currentGrid = Array.from({ length: gridSize }, () => new Array(gridSize).fill(false));
     html.find(".vr-cell").removeClass("active");
+    await _save();
   });
 
-  html.find(".vr-fill-btn").on("click", () => {
-    const grid = Array.from({ length: gridSize }, () =>
-      new Array(gridSize).fill(true)
-    );
-    token.setFlag(MODULE_ID, "rangeGrid", grid);
+  html.find(".vr-fill-btn").on("click", async () => {
+    currentGrid = Array.from({ length: gridSize }, () => new Array(gridSize).fill(true));
     html.find(".vr-cell").addClass("active");
+    await _save();
   });
 
-  html.find(".vr-invert-btn").on("click", () => {
-    let grid = token.getFlag(MODULE_ID, "rangeGrid");
-    if (!Array.isArray(grid) || grid.length !== gridSize) {
-      grid = Array.from({ length: gridSize }, () =>
-        new Array(gridSize).fill(false)
-      );
-    }
-    const inverted = grid.map(row => row.map(c => !c));
-    token.setFlag(MODULE_ID, "rangeGrid", inverted);
+  html.find(".vr-invert-btn").on("click", async () => {
+    currentGrid = currentGrid.map(row => row.map(c => !c));
     html.find(".vr-cell").each(function () {
-      const cell = $(this);
-      const cx2 = parseInt(cell.data("x"));
-      const cy2 = parseInt(cell.data("y"));
-      cell.toggleClass("active", inverted[cy2]?.[cx2] ?? false);
+      const c = $(this);
+      const cx = parseInt(c.data("x"));
+      const cy = parseInt(c.data("y"));
+      c.toggleClass("active", currentGrid[cy]?.[cx] ?? false);
     });
+    await _save();
+  });
+
+  // ── colour picker ───────────────────────────────────────────────────────────
+  if (onSaveColor) {
+    html.find(".vr-region-color").on("change", async function () {
+      await onSaveColor($(this).val());
+    });
+  }
+
+  // ── Save as Preset ──────────────────────────────────────────────────────────
+  html.find(".vr-save-preset-btn").on("click", () => {
+    const saveGrid = _cellGrid();
+    // Force-include token footprint
+    for (let ty = 0; ty < tokenH; ty++) {
+      for (let tx = 0; tx < tokenW; tx++) {
+        const gx = footStartX + tx;
+        const gy = footStartY + ty;
+        if (gy >= 0 && gy < gridSize && gx >= 0 && gx < gridSize) {
+          saveGrid[gy][gx] = true;
+        }
+      }
+    }
+    if (saveGrid.flat().every(c => !c)) {
+      ui.notifications.warn(game.i18n.localize("REGIONVIS.PresetNoCells"));
+      return;
+    }
+    openRangeDesigner(null, saveGrid);
+  });
+}
+
+// ── Hook: placed-token config ─────────────────────────────────────────────────
+Hooks.on("renderTokenConfig", (app, html, _data) => {
+  html = $(html);
+  const token = app.document;
+  if (!token) return;
+  const gridSize = game.settings.get(MODULE_ID, "gridSize");
+  let rangeGrid = token.getFlag(MODULE_ID, "rangeGrid");
+  if (!Array.isArray(rangeGrid) || rangeGrid.length !== gridSize) {
+    rangeGrid = Array.from({ length: gridSize }, () => new Array(gridSize).fill(false));
+  }
+  _renderRangeGridUI(html, {
+    width: token.width ?? 1,
+    height: token.height ?? 1,
+    rangeGrid,
+    gridSize,
+    color: token.getFlag(MODULE_ID, "regionColor") ?? game.user.color,
+  }, async (grid) => {
+    await token.update({ flags: { [MODULE_ID]: { rangeGrid: grid } } }, { render: false });
+  }, async (color) => {
+    await token.update({ flags: { [MODULE_ID]: { regionColor: color } } }, { render: false });
+  });
+});
+
+// ── Hook: prototype-token config (Actor sheet) ────────────────────────────────
+Hooks.on("renderPrototypeTokenConfig", (app, html, _data) => {
+  html = $(html);
+  const actor = app.document;
+  if (!actor) return;
+  const gridSize = game.settings.get(MODULE_ID, "gridSize");
+  const proto = actor.prototypeToken ?? {};
+  let rangeGrid = proto.flags?.[MODULE_ID]?.rangeGrid;
+  if (!Array.isArray(rangeGrid) || rangeGrid.length !== gridSize) {
+    rangeGrid = Array.from({ length: gridSize }, () => new Array(gridSize).fill(false));
+  }
+  const regionColor = proto.flags?.[MODULE_ID]?.regionColor
+    ?? (typeof game.user.color === "string" ? game.user.color : game.user.color?.css ?? "#ff0000");
+  _renderRangeGridUI(html, {
+    width: proto.width ?? 1,
+    height: proto.height ?? 1,
+    rangeGrid,
+    gridSize,
+    color: regionColor,
+  }, async (grid) => {
+    await actor.update({ [`prototypeToken.flags.${MODULE_ID}.rangeGrid`]: grid });
+  }, async (color) => {
+    await actor.update({ [`prototypeToken.flags.${MODULE_ID}.regionColor`]: color });
   });
 });
 
@@ -417,7 +558,7 @@ async function toggleRangeRegion() {
       [game.user.id]: CONST.DOCUMENT_OWNERSHIP_LEVELS.OWNER,
     },
     displayMeasurements: false,
-    color: game.user.color,
+    color: tokenDoc.getFlag(MODULE_ID, "regionColor") ?? game.user.color,
   };
 
   let regionDoc;
@@ -439,6 +580,65 @@ async function toggleRangeRegion() {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Clear All Regions — delete every tracked region for the selected token
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Delete all tracked regions (main range + every preset) for the selected token.
+ * Handles both live regions and stale flags (region deleted externally).
+ */
+async function clearAllRegions() {
+  if (!canvas.ready || !canvas.scene) {
+    ui.notifications.warn(game.i18n.localize("REGIONVIS.NoCanvas"));
+    return;
+  }
+
+  if (!game.user.isGM) {
+    ui.notifications.warn(game.i18n.localize("REGIONVIS.GMOnly"));
+    return;
+  }
+
+  const controlled = canvas.tokens?.controlled ?? [];
+  if (controlled.length === 0) {
+    ui.notifications.warn(game.i18n.localize("REGIONVIS.SelectToken"));
+    return;
+  }
+
+  const tokenDoc = controlled[0].document;
+  const flags = tokenDoc.flags?.[MODULE_ID] ?? {};
+  const deletions = [];
+  const staleFlags = [];
+
+  for (const [key, regionId] of Object.entries(flags)) {
+    if (key === "activeRegionId" || key.startsWith("activePresetRegion_")) {
+      const region = canvas.scene.regions.get(regionId);
+      if (region) {
+        deletions.push(region.delete());
+      } else {
+        staleFlags.push(key);
+      }
+    }
+  }
+
+  if (deletions.length === 0 && staleFlags.length === 0) {
+    ui.notifications.info(game.i18n.localize("REGIONVIS.NoRegionsToClear"));
+    return;
+  }
+
+  // Await region deletions — deleteRegion hooks auto-clean their flags
+  await Promise.allSettled(deletions);
+
+  // Clean up stale flags (region already gone externally)
+  for (const key of staleFlags) {
+    await tokenDoc.unsetFlag(MODULE_ID, key).catch(() => {});
+  }
+
+  ui.notifications.info(
+    game.i18n.format("REGIONVIS.RegionsCleared", { token: controlled[0].name })
+  );
+}
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Region Lifecycle — clean up token flags when a tracked region is deleted
@@ -453,14 +653,25 @@ Hooks.on("deleteRegion", (region, _options, _userId) => {
       break;
     }
   }
+  // Clean up preset region flags too
+  onDeleteRegion(region);
 });
 
 // When a token with an active range region is deleted, remove the region too
 Hooks.on("preDeleteToken", (tokenDoc, _options, _userId) => {
   const regionId = tokenDoc.getFlag(MODULE_ID, "activeRegionId");
-  if (!regionId) return;
-  const region = tokenDoc.parent?.regions?.get(regionId);
-  if (region) {
-    region.delete().catch(() => {});
+  if (regionId) {
+    const region = tokenDoc.parent?.regions?.get(regionId);
+    if (region) region.delete().catch(() => {});
   }
+  // Clean up preset regions too
+  onPreDeleteToken(tokenDoc);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Expose API on the module for macros and external use
+// ═══════════════════════════════════════════════════════════════════════════════
+
+Hooks.once("ready", () => {
+  game.modules.get(MODULE_ID).api = getApi();
 });
